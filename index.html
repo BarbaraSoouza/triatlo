@@ -466,6 +466,87 @@ header .sub { color: #5a6478; font-size: 13px; }
 .heatmap-empty { color: #c5cad9; font-weight: 500; }
 
 footer { text-align:center; color:#8b94a8; font-size:11px; margin-top: 22px; }
+
+/* ============ MOBILE RESPONSIVE ============ */
+@media (max-width: 768px) {
+  body { padding: 8px !important; }
+  header { flex-direction: column; align-items: flex-start; gap: 4px; padding: 8px 4px; }
+  header h1 { font-size: 20px !important; }
+  header .sub { font-size: 11px !important; }
+
+  /* Nav principal — scroll horizontal */
+  .tabs {
+    overflow-x: auto; overflow-y: hidden;
+    -webkit-overflow-scrolling: touch;
+    scrollbar-width: none; -ms-overflow-style: none;
+    flex-wrap: nowrap !important; width: 100% !important;
+    padding: 4px; gap: 4px;
+  }
+  .tabs::-webkit-scrollbar { display: none; }
+  .tabs .tab {
+    padding: 8px 12px !important; font-size: 12px !important;
+    white-space: nowrap; flex-shrink: 0;
+  }
+
+  /* Sub-nav de provas — scroll horizontal */
+  #race-subnav { padding: 3px !important; gap: 3px !important; }
+  #race-subnav .race-tab {
+    padding: 8px 10px !important; font-size: 11px !important;
+    min-width: unset !important; flex-shrink: 0;
+  }
+
+  /* Grids gerais colapsam pra 1 coluna */
+  .grid { grid-template-columns: 1fr !important; gap: 10px !important; }
+  .kpis { grid-template-columns: repeat(2, 1fr) !important; }
+  .mini-grid { grid-template-columns: repeat(2, 1fr) !important; gap: 6px !important; }
+
+  /* Cards mais compactos */
+  .card { padding: 12px 14px !important; }
+  .section-title { font-size: 14px !important; margin-top: 14px !important; }
+  h2 { font-size: 18px !important; }
+  h3 { font-size: 13px !important; }
+
+  /* KPIs menores */
+  .card.mini h4 { font-size: 10px !important; }
+  .card.mini .big { font-size: 18px !important; }
+  .card.mini .small { font-size: 10px !important; }
+  .card.mini canvas { max-height: 40px !important; }
+
+  /* Load chart menor */
+  .hero canvas { max-height: 140px !important; }
+  .hero-legend { font-size: 9px !important; gap: 6px !important; }
+
+  /* Countdown MKS 3 no home */
+  [id="hero-days-mks3"] { font-size: 38px !important; }
+
+  /* Calendário compacto */
+  .cal-day { font-size: 10px; }
+  .cal-day .num { font-size: 11px; }
+  .cal-day .race { font-size: 8px; padding: 1px 3px; }
+
+  /* Textareas / inputs */
+  textarea, input[type=text], input[type=date] {
+    font-size: 16px !important; /* evita zoom automático do iOS */
+  }
+  .plan-input textarea { min-height: 200px !important; }
+
+  /* Tabelas com scroll horizontal */
+  table { display: block; overflow-x: auto; -webkit-overflow-scrolling: touch; }
+
+  /* Bike analysis, race cards — layouts em coluna */
+  [style*="grid-template-columns: repeat(auto-fit"] {
+    grid-template-columns: 1fr !important;
+  }
+}
+
+/* ============ EXTRA SMALL (iPhone SE / mini) ============ */
+@media (max-width: 400px) {
+  .tabs .tab { padding: 7px 10px !important; font-size: 11px !important; }
+  .kpis { grid-template-columns: 1fr !important; }
+  .mini-grid { grid-template-columns: repeat(2, 1fr) !important; }
+  .section-title { font-size: 13px !important; }
+  body { padding: 6px !important; }
+}
 </style>
 </head>
 <body>
@@ -4157,6 +4238,7 @@ footer { text-align:center; color:#8b94a8; font-size:11px; margin-top: 22px; }
         <label style="font-size:11px;color:#6b7388;">Semana iniciando em:</label>
         <input type="date" id="plan-start">
       </div>
+      <div id="plan-source-hint" style="display:none; font-size:11px; padding:8px 12px; background:#e1f0ff; border:1px solid #4a7dff; border-radius:6px; color:#1f3b8a; margin-bottom:8px; line-height:1.4;"></div>
       <textarea id="plan-text" placeholder="Segunda: bike
 1h giro leve leve
 Terça: teste de pista V3000
@@ -5515,26 +5597,23 @@ if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.
 })();
 
 // ---------- Sub-tabs de Provas ----------
-document.querySelectorAll('.race-tab').forEach(t => {
-  t.addEventListener('click', () => {
-    const race = t.dataset.race;
-    // atualizar botões
-    document.querySelectorAll('.race-tab').forEach(x => {
-      x.classList.remove('active');
-      x.style.background = 'transparent';
-      x.style.color = '#5a6478';
-      x.style.fontWeight = '600';
-    });
-    t.classList.add('active');
-    t.style.background = '#1a2238';
-    t.style.color = '#fff';
-    t.style.fontWeight = '700';
-    // mostrar/esconder seções
-    document.querySelectorAll('.race-section').forEach(s => {
-      s.style.display = (s.dataset.raceSection === race) ? '' : 'none';
-    });
+function activateRaceTab(race) {
+  document.querySelectorAll('.race-tab').forEach(x => {
+    const isActive = x.dataset.race === race;
+    x.classList.toggle('active', isActive);
+    x.style.background = isActive ? '#1a2238' : 'transparent';
+    x.style.color     = isActive ? '#fff' : '#5a6478';
+    x.style.fontWeight = isActive ? '700' : '600';
   });
+  document.querySelectorAll('.race-section').forEach(s => {
+    s.style.display = (s.dataset.raceSection === race) ? '' : 'none';
+  });
+}
+document.querySelectorAll('.race-tab').forEach(t => {
+  t.addEventListener('click', () => activateRaceTab(t.dataset.race));
 });
+// Força init da sub-aba ativa (default MKS 3) — resolve bug de dados só aparecerem após clicar em outra sub-aba
+activateRaceTab('mks3');
 
 // ---------- KPIs ----------
 function buildKpis() {
@@ -6207,13 +6286,20 @@ function loadPlan() {
   migrateLegacyPlanIfNeeded();
   const all = loadAllWeeks();
   const wk = all[CURRENT_WEEK_START];
-  if (wk) return wk;
-  // Fallback: se a semana atual exibida coincide com o legado, devolve
+  if (wk && wk.text) return wk;
+  // Fallback 1: se a semana atual exibida coincide com o legado, devolve
   try {
     const legacy = JSON.parse(localStorage.getItem(LS_PLAN) || '{}');
     if (legacy.start === CURRENT_WEEK_START) return legacy;
   } catch {}
-  // Sem plano nessa semana
+  // Fallback 2: procura o plano SALVO mais recente e usa como sugestão pra semana atual
+  // Isso resolve o bug de "salvei o plano semana passada e sumiu esta semana"
+  const savedWeeks = Object.keys(all).filter(k => all[k] && all[k].text).sort();
+  if (savedWeeks.length) {
+    const latest = savedWeeks[savedWeeks.length - 1];
+    return { text: all[latest].text, start: CURRENT_WEEK_START, _sourceWeek: latest };
+  }
+  // Sem plano em nenhuma semana
   return { text: '', start: CURRENT_WEEK_START };
 }
 function savePlan(p) {
@@ -6383,6 +6469,16 @@ function renderPlan() {
   const plan = loadPlan();
   document.getElementById('plan-text').value = plan.text || '';
   document.getElementById('plan-start').value = CURRENT_WEEK_START;
+  // Se o plano veio de outra semana (fallback), avisa
+  const srcHint = document.getElementById('plan-source-hint');
+  if (srcHint) {
+    if (plan._sourceWeek && plan._sourceWeek !== CURRENT_WEEK_START) {
+      srcHint.style.display = 'block';
+      srcHint.innerHTML = `📋 Plano copiado da semana <strong>${fmtDate(plan._sourceWeek)}</strong>. Clique <strong>Salvar e visualizar</strong> pra fixar nesta semana.`;
+    } else {
+      srcHint.style.display = 'none';
+    }
+  }
 
   const parsed = parsePlan(plan.text || '');
   const startStr = CURRENT_WEEK_START;
