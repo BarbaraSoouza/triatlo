@@ -1222,6 +1222,24 @@ footer { text-align:center; color:#8b94a8; font-size:11px; margin-top: 22px; }
   </div>
 
   <div class="section-title">😴 Sono — última noite</div>
+
+  <!-- Upload de CSV de sono do Garmin -->
+  <div class="card" style="padding:12px 16px; margin-bottom:12px; background:#f0f4ff; border:1px dashed #4a7dff;">
+    <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap; justify-content:space-between;">
+      <div style="flex:1; min-width:200px;">
+        <div style="font-size:13px; font-weight:700; color:#1f3b8a;">⬆️ Upload CSV de sono</div>
+        <div style="font-size:11px; color:#5a6478; margin-top:2px;">Exporta do Garmin Connect (Sleep Score 1 dia) e sobe aqui. Aceita múltiplos arquivos.</div>
+      </div>
+      <div style="display:flex; gap:8px; flex-wrap:wrap;">
+        <button id="sleep-upload-btn" style="padding:8px 14px; background:#1f3b8a; color:#fff; border:none; border-radius:6px; cursor:pointer; font-size:12px; font-weight:700;">Selecionar arquivos</button>
+        <input type="file" id="sleep-upload-input" accept=".csv,text/csv" multiple style="display:none;">
+        <button id="sleep-uploads-clear" style="padding:8px 14px; background:transparent; color:#c44525; border:1px solid #c44525; border-radius:6px; cursor:pointer; font-size:11px;" title="Remove todos os CSVs que você subiu (mantém dados originais embarcados)">🗑 Limpar uploads</button>
+      </div>
+    </div>
+    <div id="sleep-upload-status" style="font-size:11px; margin-top:10px; padding:8px 10px; background:#fff; border-radius:6px; display:none;"></div>
+    <div id="sleep-uploads-summary" style="font-size:11px; color:#5a6478; margin-top:8px;"></div>
+  </div>
+
   <div class="card" id="sleep-latest-card" style="padding:16px 18px;">
     <div style="display:grid; grid-template-columns: auto 1fr; gap: 16px; align-items: center;">
       <div style="text-align:center; min-width:120px;">
@@ -5521,6 +5539,193 @@ document.querySelectorAll('.tab').forEach(t => {
   el.textContent = diff;
 })();
 
+// ============================================================
+// UPLOAD DE CSV DE SONO (Garmin Connect)
+// ============================================================
+const LS_SLEEP_EXTRA = 'triathlon_sleep_extra_v1';
+
+function loadSleepExtra() {
+  try { return JSON.parse(localStorage.getItem(LS_SLEEP_EXTRA) || '{}'); } catch { return {}; }
+}
+function saveSleepExtra(obj) {
+  try { localStorage.setItem(LS_SLEEP_EXTRA, JSON.stringify(obj)); } catch {}
+}
+
+// Converte "8h 20m", "1h 6m", "22m", "45s" → decimal em horas
+function parseDurToHours(s) {
+  if (!s) return 0;
+  s = String(s).replace(/[ \s]+/g,' ').trim();
+  let h = 0, m = 0, sec = 0;
+  let match;
+  match = s.match(/(\d+)\s*h/i); if (match) h = parseInt(match[1]);
+  match = s.match(/(\d+)\s*m(?!in)/i); if (match) m = parseInt(match[1]);
+  match = s.match(/(\d+)\s*s/i); if (match) sec = parseInt(match[1]);
+  return h + m/60 + sec/3600;
+}
+// "48 ms" → 48, "65 bpm" → 65, "'+57" → 57
+function parseNumFromField(s) {
+  if (s === null || s === undefined) return null;
+  const m = String(s).match(/-?\d+([.,]\d+)?/);
+  if (!m) return null;
+  return parseFloat(m[0].replace(',','.'));
+}
+
+// Parser CSV: extrai chave -> valor por linha (2 colunas separadas por vírgula)
+function parseSleepCsv(text) {
+  // BOM
+  if (text.charCodeAt(0) === 0xFEFF) text = text.slice(1);
+  const map = {};
+  text.split(/\r?\n/).forEach(line => {
+    line = line.trim();
+    if (!line) return;
+    // primeira vírgula divide chave e valor (valor pode conter vírgula? não neste export)
+    const idx = line.indexOf(',');
+    if (idx < 0) return;
+    const key = line.slice(0, idx).trim();
+    const val = line.slice(idx+1).trim();
+    if (key && val !== undefined) map[key.toLowerCase()] = val;
+  });
+  // extrai campos essenciais
+  const date = map['data'] || null;
+  if (!date) return null;
+  const total_h  = parseDurToHours(map['duração do sono']);
+  const deep_h   = parseDurToHours(map['duração do sono profundo']);
+  const light_h  = parseDurToHours(map['duração do sono leve']);
+  const rem_h    = parseDurToHours(map['duração do rem']);
+  const awake_h  = parseDurToHours(map['tempo acordado']);
+  const score    = parseNumFromField(map['sleep score']);
+  const stress   = parseNumFromField(map['estresse média']);
+  const resp     = parseNumFromField(map['média da taxa de respiração']);
+  const hrv      = parseNumFromField(map['vfc média durante a noite']);
+  const rhr      = parseNumFromField(map['frequência cardíaca em repouso']);
+  const hrv_status_txt = (map['vfc média de 7 dias'] || '').toLowerCase();
+  let hrv_status = 'IN_RANGE';
+  if (hrv_status_txt.includes('baixo') || hrv_status_txt.includes('baixa')) hrv_status = 'LOW';
+  else if (hrv_status_txt.includes('desequilibr') || hrv_status_txt.includes('desbalance')) hrv_status = 'UNBALANCED';
+
+  return {
+    date,
+    sleep: {
+      date, total_h, deep_h, light_h, rem_h, awake_h,
+      score: score || 0,
+      stress: stress || 0,
+      resp: resp || 0
+    },
+    hrv: (hrv !== null || rhr !== null) ? {
+      date,
+      hrv: hrv || null,
+      hrv_lower: 32, hrv_upper: 62, // faixa Garmin default
+      hrv_status,
+      rhr: rhr || null
+    } : null
+  };
+}
+
+// Hidrata DATA.sleep e DATA.hrv com dados uploaded (merge por data — upload sobrescreve embarcado)
+function hydrateSleepFromExtra() {
+  const extra = loadSleepExtra();
+  const dates = Object.keys(extra);
+  if (!dates.length) return { added: 0, total: 0 };
+  let added = 0;
+  dates.forEach(date => {
+    const entry = extra[date];
+    if (entry.sleep) {
+      const i = DATA.sleep.findIndex(s => s.date === date);
+      if (i >= 0) DATA.sleep[i] = entry.sleep;
+      else { DATA.sleep.push(entry.sleep); added++; }
+    }
+    if (entry.hrv) {
+      const i = DATA.hrv.findIndex(h => h.date === date);
+      if (i >= 0) DATA.hrv[i] = entry.hrv;
+      else DATA.hrv.push(entry.hrv);
+    }
+  });
+  DATA.sleep.sort((a,b) => a.date.localeCompare(b.date));
+  DATA.hrv.sort((a,b) => a.date.localeCompare(b.date));
+  return { added, total: dates.length };
+}
+
+// UI: recomputar tudo depois de upload
+function refreshAllSleepRelated() {
+  try { buildKpis(); } catch(e){}
+  try { buildLoadChart(); } catch(e){}
+  try { buildAcwrGauge(); } catch(e){}
+  try { buildMinis(); } catch(e){}
+  try { buildHrvChart(); } catch(e){}
+  try { buildSleepChart(); } catch(e){}
+  try { buildRhrChart(); } catch(e){}
+  try { renderLatestSleepCard(); } catch(e){}
+}
+
+// UI: mostra summary de uploads acumulados
+function renderSleepUploadsSummary() {
+  const el = document.getElementById('sleep-uploads-summary');
+  if (!el) return;
+  const extra = loadSleepExtra();
+  const dates = Object.keys(extra).sort();
+  if (!dates.length) { el.innerHTML = ''; return; }
+  const first = dates[0], last = dates[dates.length-1];
+  el.innerHTML = `📦 <strong>${dates.length}</strong> noite(s) armazenada(s) localmente · <strong>${first}</strong> → <strong>${last}</strong>`;
+}
+
+// UI: processa arquivos escolhidos
+async function handleSleepUpload(files) {
+  const statusEl = document.getElementById('sleep-upload-status');
+  statusEl.style.display = 'block';
+  statusEl.innerHTML = '⏳ Processando ' + files.length + ' arquivo(s)...';
+  const extra = loadSleepExtra();
+  let ok = 0, fail = 0, dates = [];
+  for (const file of files) {
+    try {
+      const text = await file.text();
+      const parsed = parseSleepCsv(text);
+      if (parsed && parsed.date) {
+        extra[parsed.date] = parsed;
+        ok++;
+        dates.push(parsed.date);
+      } else {
+        fail++;
+      }
+    } catch (e) {
+      fail++;
+    }
+  }
+  saveSleepExtra(extra);
+  hydrateSleepFromExtra();
+  refreshAllSleepRelated();
+  renderSleepUploadsSummary();
+  statusEl.innerHTML = `✅ <strong>${ok}</strong> arquivo(s) importado(s)${fail?` · ❌ ${fail} falha(s)`:''}${dates.length?`<br>Datas: ${dates.sort().join(', ')}`:''}`;
+  statusEl.style.background = ok ? '#e2f5e9' : '#fef5f2';
+  setTimeout(() => { statusEl.style.background = '#fff'; }, 4000);
+}
+
+// Handlers
+document.addEventListener('DOMContentLoaded', () => {
+  const btn = document.getElementById('sleep-upload-btn');
+  const input = document.getElementById('sleep-upload-input');
+  const clearBtn = document.getElementById('sleep-uploads-clear');
+  if (btn && input) {
+    btn.addEventListener('click', () => input.click());
+    input.addEventListener('change', (e) => {
+      if (e.target.files && e.target.files.length) {
+        handleSleepUpload(Array.from(e.target.files));
+        input.value = '';
+      }
+    });
+  }
+  if (clearBtn) {
+    clearBtn.addEventListener('click', () => {
+      if (!confirm('Remover TODOS os CSVs que você subiu?\n\nOs dados originais embarcados voltam a valer. Os arquivos originais em CSV no seu computador NÃO são afetados.')) return;
+      localStorage.removeItem(LS_SLEEP_EXTRA);
+      location.reload();
+    });
+  }
+  renderSleepUploadsSummary();
+});
+
+// Hidratar dados no boot (roda antes do build inicial)
+try { hydrateSleepFromExtra(); } catch(e){}
+
 // ---------- Registrar Service Worker (PWA) ----------
 // Só funciona quando servido via HTTP/HTTPS (ex: GitHub Pages). Ignora em file://
 if ('serviceWorker' in navigator && (location.protocol === 'https:' || location.hostname === 'localhost')) {
@@ -7016,7 +7221,8 @@ function exportAllData() {
     v3000: (function(){ try { return JSON.parse(localStorage.getItem('triathlon_v3000_v1')||'null'); } catch { return null; } })(),
     plan_weeks: (function(){ try { return JSON.parse(localStorage.getItem('triathlon_plan_weeks_v1')||'null'); } catch { return null; } })(),
     meals: (function(){ try { return JSON.parse(localStorage.getItem('triathlon_meals_v1')||'null'); } catch { return null; } })(),
-    mj: (function(){ try { return JSON.parse(localStorage.getItem('triathlon_mj_v1')||'null'); } catch { return null; } })()
+    mj: (function(){ try { return JSON.parse(localStorage.getItem('triathlon_mj_v1')||'null'); } catch { return null; } })(),
+    sleep_extra: (function(){ try { return JSON.parse(localStorage.getItem('triathlon_sleep_extra_v1')||'null'); } catch { return null; } })()
   };
   const blob = new Blob([JSON.stringify(payload, null, 2)], { type: 'application/json' });
   const a = document.createElement('a');
@@ -7045,6 +7251,7 @@ function importAllData(file) {
       if (data.plan_weeks) localStorage.setItem('triathlon_plan_weeks_v1', JSON.stringify(data.plan_weeks));
       if (data.meals) localStorage.setItem('triathlon_meals_v1', JSON.stringify(data.meals));
       if (data.mj) localStorage.setItem('triathlon_mj_v1', JSON.stringify(data.mj));
+      if (data.sleep_extra) localStorage.setItem('triathlon_sleep_extra_v1', JSON.stringify(data.sleep_extra));
       alert('✓ Backup importado com sucesso. Recarregando...');
       location.reload();
     } catch (err) {
