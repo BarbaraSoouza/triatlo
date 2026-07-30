@@ -5621,7 +5621,7 @@ function parseSleepCsv(text) {
   };
 }
 
-// Hidrata DATA.sleep e DATA.hrv com dados uploaded (merge por data — upload sobrescreve embarcado)
+// Hidrata DATA.sleep, DATA.hrv e SLEEP_MANUAL_LOG com dados uploaded (merge por data — upload sobrescreve embarcado)
 function hydrateSleepFromExtra() {
   const extra = loadSleepExtra();
   const dates = Object.keys(extra);
@@ -5639,9 +5639,41 @@ function hydrateSleepFromExtra() {
       if (i >= 0) DATA.hrv[i] = entry.hrv;
       else DATA.hrv.push(entry.hrv);
     }
+    // Também alimenta SLEEP_MANUAL_LOG (usado pelo card "última noite" da aba Saúde)
+    if (typeof SLEEP_MANUAL_LOG !== 'undefined' && entry.sleep) {
+      const s = entry.sleep;
+      const h = entry.hrv || {};
+      const manualEntry = {
+        date,
+        score: s.score || 0,
+        quality: s.score>=85?'Bom': s.score>=70?'Razoável': s.score>=55?'Ruim':'Muito ruim',
+        total_h: s.total_h || 0,
+        total_min: Math.round((s.total_h || 0) * 60),
+        deep_min:  Math.round((s.deep_h  || 0) * 60),
+        light_min: Math.round((s.light_h || 0) * 60),
+        rem_min:   Math.round((s.rem_h   || 0) * 60),
+        awake_min: Math.round((s.awake_h || 0) * 60),
+        rhr: h.rhr || null,
+        hr_night_avg: null,
+        hrv: h.hrv || null,
+        hrv_7d_status: h.hrv_status === 'IN_RANGE' ? 'Equilibrado' : (h.hrv_status === 'LOW' ? 'Baixo' : 'Desequilibrada'),
+        stress_avg: s.stress || 0,
+        restless_moments: null,
+        body_battery_change: null,
+        spo2_avg: null, spo2_min: null,
+        breath_avg: s.resp || null, breath_min: null,
+        source: 'CSV upload'
+      };
+      const j = SLEEP_MANUAL_LOG.findIndex(x => x.date === date);
+      if (j >= 0) SLEEP_MANUAL_LOG[j] = manualEntry;
+      else SLEEP_MANUAL_LOG.push(manualEntry);
+    }
   });
   DATA.sleep.sort((a,b) => a.date.localeCompare(b.date));
   DATA.hrv.sort((a,b) => a.date.localeCompare(b.date));
+  if (typeof SLEEP_MANUAL_LOG !== 'undefined') {
+    SLEEP_MANUAL_LOG.sort((a,b) => a.date.localeCompare(b.date));
+  }
   return { added, total: dates.length };
 }
 
